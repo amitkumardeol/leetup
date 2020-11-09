@@ -6,19 +6,18 @@ use std::io::Read;
 use std::path::Path;
 
 type LangInjectCode = HashMap<String, InjectCode>;
+type PickHookConfig = HashMap<String, PickHook>;
 
-// TODO move to ~/.leetup/config.json
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct Config {
+    #[serde(skip)]
     pub urls: Urls,
+
     pub inject_code: Option<LangInjectCode>,
+    pub pick_hook: Option<PickHookConfig>,
 }
 
 impl Config {
-    fn new(urls: Urls, inject_code: Option<LangInjectCode>) -> Self {
-        Config { urls, inject_code }
-    }
-
     pub fn get<P: AsRef<Path>>(path: P) -> Result<Self> {
         let base = "https://leetcode.com";
         let urls = Urls {
@@ -36,15 +35,12 @@ impl Config {
             submission: format!("{}/submissions/detail/$id", base),
             verify: format!("{}/submissions/detail/$id/check/", base),
         };
-
-        let mut inject_code: Option<LangInjectCode> = None;
-        let config: Result<serde_json::Value> = Config::get_config(path);
-        if let Ok(config) = config {
-            inject_code =
-                serde_json::from_value::<LangInjectCode>(config["inject_code"].clone()).ok();
+        let mut config: Result<Config> = Config::get_config(path);
+        if let Ok(ref mut config) = config {
+            config.urls = urls;
         }
 
-        Ok(Config::new(urls, inject_code))
+        config
     }
 
     fn get_config<P: AsRef<Path>, T: DeserializeOwned>(path: P) -> Result<T> {
@@ -72,7 +68,7 @@ impl ToString for Either {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 pub struct Urls {
     pub base: String,
     pub api: String,
@@ -97,6 +93,37 @@ pub struct InjectCode {
     pub before_function_definition: Option<Either>,
 }
 
+/// Make code generation more flexible with capabilities to run scripts before
+/// and after generation.
+///
+/// Provide the ability to change filenames through certain pre-defined transformation actions.
+#[derive(Debug, Deserialize)]
+pub struct PickHook {
+    working_dir: String,
+    script: Option<PickHookScript>,
+    transform: Option<PickHookTransform>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PickHookScript {
+    pre_generation: Option<Either>,
+    post_generation: Option<Either>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PickHookTransform {
+    filename: String,
+    action: PickHookTransformAction,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PickHookTransformAction {
+    Rename,
+    RenameCamelCase,
+    CamelCase,
+}
+
 #[test]
 fn test_config() {
     let mut data_dir = std::path::PathBuf::new();
@@ -106,4 +133,5 @@ fn test_config() {
     let config: Config = Config::get(data_dir).unwrap();
     assert!(config.inject_code.is_some());
     assert!(config.urls.base.len() > 0);
+    assert!(config.pick_hook.is_some());
 }
